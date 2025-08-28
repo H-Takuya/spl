@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Splatoon3 戦績OCR（MVP）</title>
+  <title>Splatoon3 戦績OCR（MVP復旧版・修正版）</title>
   <style>
     :root { --bg:#0b0b10; --panel:#141420; --text:#e5e7eb; --muted:#9aa0a6; --accent:#22c55e; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background:var(--bg); color:var(--text); }
@@ -24,7 +24,7 @@
     .grid { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:8px; }
     .grid-3 { display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:8px; }
     label { font-size:12px; color:var(--muted); display:block; margin-bottom:4px; }
-    input, select, textarea { width:100%; box-sizing:border-box; background:#0f0f1a; color:var(--text); border:1px solid #2a2a44; border-radius:10px; padding:10px; }
+    input, select, textarea { width:100%; box-sizing:border-box; background:#0f0f1a; color:#e5e7eb; border:1px solid #2a2a44; border-radius:10px; padding:10px; }
     table { width:100%; border-collapse: collapse; }
     th, td { border-bottom:1px solid #232336; padding:8px 10px; text-align:left; font-size:14px; }
     th { color:#9aa0a6; font-weight:600; }
@@ -33,25 +33,23 @@
     .muted { color:#9aa0a6; }
     .pill { font-size:12px; padding:4px 8px; border-radius:999px; background:#0f172a; border:1px solid #27324f; }
   </style>
-  <!-- Tesseract.js CDN -->
   <script src="https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 </head>
 <body>
   <header>
-    <h1>Splatoon3 戦績OCR（ブラウザのみ／ローカル保存）</h1>
+    <h1>Splatoon3 戦績OCR（ブラウザのみ／ローカル保存・復旧版）</h1>
   </header>
   <main>
-    <!-- 左：入力／画像プレビュー -->
     <section class="card">
       <div class="section">
         <div id="drop" class="dropzone">
           <strong>スクショをドラッグ＆ドロップ</strong><br>
-          <small>PNG/JPG（16:9 1080p/720p 推奨）。ファイルは端末内のみで処理します。</small>
+          <small>PNG/JPG 推奨。端末内でのみ処理します。</small>
           <div style="height:8px"></div>
           <input id="file" type="file" accept="image/*" style="display:none" />
           <div class="row" style="justify-content:center">
             <button id="pick" class="btn">ファイルを選ぶ</button>
-            <button id="demo" class="btn">デモ画像を読み込む</button>
+            <button id="demo" class="btn">デモ画像</button>
           </div>
         </div>
       </div>
@@ -62,23 +60,22 @@
             <span class="pill" id="imgMeta">画像未読込</span>
           </div>
           <div class="row">
-            <button id="auto" class="btn accent" disabled>自動解析（OCR）</button>
+            <button id="auto" class="btn accent" disabled>自動解析</button>
             <button id="reset" class="btn warn" disabled>リセット</button>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- 右：抽出結果／編集／CSV出力 -->
     <section class="card">
       <div class="section">
         <div class="row" style="justify-content:space-between; align-items:flex-end">
           <div>
             <div style="font-size:16px; font-weight:700;">抽出結果（編集可）</div>
-            <small class="muted">誤認識は上書きしてください。ローカルに保存されます。</small>
+            <small class="muted">誤認識は上書きしてください。ローカル保存。</small>
           </div>
           <div class="row">
-            <button id="copyCsv" class="btn" disabled>1行CSVをコピー</button>
+            <button id="copyCsv" class="btn" disabled>1行CSVコピー</button>
             <button id="append" class="btn" disabled>一覧に追加</button>
           </div>
         </div>
@@ -111,37 +108,37 @@
             </select>
           </div>
           <div>
-            <label>K（キル）</label>
+            <label>K</label>
             <input id="kills" type="number" inputmode="numeric" />
           </div>
           <div>
-            <label>D（デス）</label>
+            <label>D</label>
             <input id="deaths" type="number" inputmode="numeric" />
           </div>
         </div>
         <div class="grid-3" style="margin-top:8px">
           <div>
-            <label>A（アシスト）</label>
+            <label>A</label>
             <input id="assists" type="number" inputmode="numeric" />
           </div>
           <div>
-            <label>SP（スペシャル）</label>
+            <label>SP</label>
             <input id="specials" type="number" inputmode="numeric" />
           </div>
           <div>
-            <label>塗りポイント</label>
+            <label>塗り</label>
             <input id="paint" type="number" inputmode="numeric" />
           </div>
         </div>
         <div style="height:12px"></div>
-        <label>備考 / コメント（例：野良、編成事故、通信落ち 等）</label>
+        <label>備考</label>
         <textarea id="note" rows="2" placeholder="メモ"></textarea>
       </div>
       <div class="section">
         <div class="row" style="justify-content:space-between; align-items:center">
           <div style="font-weight:700">記録一覧（端末ローカル）</div>
           <div class="row">
-            <button id="exportCsv" class="btn">CSVを書き出し</button>
+            <button id="exportCsv" class="btn">CSV書き出し</button>
             <button id="clearAll" class="btn warn">全消去</button>
           </div>
         </div>
@@ -170,283 +167,130 @@
   </main>
 
   <script>
-    // ---- ユーティリティ ----
     const $ = (id) => document.getElementById(id);
+    const FIELDS = ["matchAt","result","mode","stage","weapon","kills","deaths","assists","specials","paint","note"];
+    const state = { image:null, imageBitmap:null, width:0, height:0, scaleX:1, scaleY:1, rows: JSON.parse(localStorage.getItem("spla-rows")||"[]") };
 
-    const FIELDS = [
-      'matchAt','result','mode','stage','weapon','kills','deaths','assists','specials','paint','note'
-    ];
-
-    const state = {
-      image: null,
-      imageBitmap: null,
-      width: 0,
-      height: 0,
-      scaleX: 1,
-      scaleY: 1,
-      rows: JSON.parse(localStorage.getItem('spla-rows')||'[]'),
-    };
-
-    function drawPreview() {
-      const canvas = $('preview');
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      if (!state.imageBitmap) return;
-      canvas.width  = state.width;
-      canvas.height = state.height;
-      ctx.drawImage(state.imageBitmap, 0, 0, state.width, state.height);
+    function drawPreview(){
+      const c=$("preview");
+      const x=c.getContext("2d");
+      x.clearRect(0,0,c.width,c.height);
+      if(!state.imageBitmap) return;
+      c.width=state.width; c.height=state.height;
+      x.drawImage(state.imageBitmap,0,0,state.width,state.height);
     }
+    function setImgMeta(){ const t = state.image? (state.image.name+"  /  "+state.width+"×"+state.height) : "画像未読込"; $("imgMeta").textContent=t; }
+    function enableImageActions(b){ $("auto").disabled=!b; $("reset").disabled=!b; $("copyCsv").disabled=false; $("append").disabled=false; }
+    function values(){ const v={}; for(const k of FIELDS){ v[k]=($(k).value||"").toString().trim(); } return v; }
+    function setValues(v){ for(const k of FIELDS){ if(k in v) $(k).value = v[k]!==undefined && v[k]!==null ? v[k] : ""; } }
+    function csvEscape(s){ const t=(s||"").toString(); if(t.indexOf('"')>=0 || t.indexOf(',')>=0 || t.indexOf(String.fromCharCode(10))>=0){ return '"'+t.split('"').join('""')+'"'; } return t; }
+    function fmtRow(v){ const a=[v.matchAt,v.result,v.mode,v.stage,v.weapon,v.kills,v.deaths,v.assists,v.specials,v.paint,v.note]; return a.map(csvEscape).join(','); }
+    function renderTable(){ const tb=document.querySelector('#table tbody'); tb.innerHTML=''; for(let i=0;i<state.rows.length;i++){ const r=state.rows[i]; const tr=document.createElement('tr'); const cells=[i+1,r.matchAt,r.result,r.mode,r.stage,r.weapon,r.kills,r.deaths,r.assists,r.specials,r.paint,r.note]; for(const c of cells){ const td=document.createElement('td'); td.textContent=c?c:''; tr.appendChild(td);} tb.appendChild(tr);} }
+    function saveRows(){ localStorage.setItem('spla-rows', JSON.stringify(state.rows)); }
+    function download(name,text){ const blob=new Blob([text],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; a.click(); URL.revokeObjectURL(url); }
 
-    function setImgMeta() {
-      const meta = state.image ? `${state.image.name}  /  ${state.width}×${state.height}` : '画像未読込';
-      $('imgMeta').textContent = meta;
-    }
-
-    function enableImageActions(enabled) {
-      $('auto').disabled  = !enabled;
-      $('reset').disabled = !enabled;
-      $('copyCsv').disabled = false;
-      $('append').disabled = false;
-    }
-
-    function values() {
-      const v = {};
-      for (const k of FIELDS) v[k] = $(k).value?.toString().trim() || '';
-      return v;
-    }
-
-    function setValues(v) {
-      for (const k of FIELDS) if (k in v) $(k).value = v[k] ?? '';
-    }
-
-    function fmtRow(v) {
-      // CSV: 日時,勝敗,ルール,ステージ,ブキ,K,D,A,SP,塗り,備考
-      const row = [v.matchAt,v.result,v.mode,v.stage,v.weapon,v.kills,v.deaths,v.assists,v.specials,v.paint,v.note];
-      return row.map(x => {
-        const s = (x??'').toString();
-        return /[",
-]/.test(s) ? '"'+s.replaceAll('"','""')+'"' : s;
-      }).join(',');
-    }
-
-    function renderTable() {
-      const tbody = document.querySelector('#table tbody');
-      tbody.innerHTML = '';
-      state.rows.forEach((r,i)=>{
-        const tr = document.createElement('tr');
-        const cells = [
-          i+1, r.matchAt, r.result, r.mode, r.stage, r.weapon,
-          r.kills, r.deaths, r.assists, r.specials, r.paint, r.note
-        ];
-        for (const c of cells) {
-          const td = document.createElement('td');
-          td.textContent = c ?? '';
-          tr.appendChild(td);
+    async function safeLoadImage(file){
+      try{
+        if(!file) throw new Error('ファイル未選択');
+        if(!file.type || !file.type.startsWith('image/')) throw new Error('画像ファイルではありません');
+        let bmp=null;
+        try{
+          bmp=await createImageBitmap(file);
+        }catch(e){
+          const dataUrl=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(file); });
+          bmp=await new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>res(createImageBitmap(img)); img.onerror=()=>rej(new Error('画像の読み込みに失敗しました')); img.src=dataUrl; });
         }
-        tbody.appendChild(tr);
-      });
-    }
-
-    function saveRows() {
-      localStorage.setItem('spla-rows', JSON.stringify(state.rows));
-    }
-
-    function download(filename, text) {
-      const blob = new Blob([text], {type:'text/csv;charset=utf-8;'});
-      const url  = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = filename; a.click();
-      URL.revokeObjectURL(url);
-    }
-
-    // ---- 画像取込 ----
-    async function loadImage(file) {
-      state.image = file;
-      const img = await createImageBitmap(file);
-      state.imageBitmap = img;
-      state.width  = img.width;
-      state.height = img.height;
-      state.scaleX = state.width / 1920; // 解析領域の基準サイズ（1920×1080）
-      state.scaleY = state.height / 1080;
-      drawPreview();
-      setImgMeta();
-      enableImageActions(true);
-    }
-
-    // デモ画像（ユーザーの環境では空。必要なら自身の画像URLを貼る）
-    async function loadDemo() {
-      try {
-        const res = await fetch('demo-spla3.jpg'); // 置けるなら同階層に配置
-        if (!res.ok) throw new Error('Demo image not found');
-        const blob = await res.blob();
-        await loadImage(new File([blob], 'demo-spla3.jpg', {type: blob.type}));
-      } catch (e) {
-        alert('デモ画像がありません。手元のスクショを読み込んでください。');
+        state.image=file; state.imageBitmap=bmp; state.width=bmp.width; state.height=bmp.height; state.scaleX=state.width/1920; state.scaleY=state.height/1080;
+        drawPreview(); setImgMeta(); enableImageActions(true);
+      }catch(err){
+        console.error(err);
+        alert('画像の読み込みに失敗しました。別のファイルで試すか、ブラウザを最新化してください。\n詳細: '+(err&&err.message?err.message:err));
       }
     }
 
-    // ---- OCR 解析（MVP） ----
-    // 重要：領域は「割合」で定義し、解像度差に強い設計にする
-    // ※数値は初期案。必要に応じてあなたのスクショで微調整してください。
-    const ROIS = {
-      // 例：左上の勝敗表示（WIN/LOSE）の凡その位置（TVモードのバトルリザルト想定）
-      result: { x:0.04, y:0.06, w:0.18, h:0.08 },
-      // 例：キル・デス（自分の行）
-      kd:     { x:0.74, y:0.62, w:0.20, h:0.10 },
-      // 例：塗りポイント
-      paint:  { x:0.78, y:0.80, w:0.16, h:0.08 },
-      // 例：ステージ名
-      stage:  { x:0.33, y:0.18, w:0.34, h:0.08 },
-      // 例：ルール
-      mode:   { x:0.33, y:0.11, w:0.34, h:0.06 },
-      // 例：武器名（自分の欄）
-      weapon: { x:0.16, y:0.62, w:0.28, h:0.10 },
-    };
-
-    function cropToCanvas(srcCanvas, roi) {
-      const {width, height} = srcCanvas;
-      const sx = Math.round(roi.x * width);
-      const sy = Math.round(roi.y * height);
-      const sw = Math.round(roi.w * width);
-      const sh = Math.round(roi.h * height);
-      const out = document.createElement('canvas');
-      out.width = sw; out.height = sh;
-      out.getContext('2d').drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
-      return out;
+    async function loadDemo(){
+      try{
+        const res=await fetch('demo-spla3.jpg');
+        if(!res.ok) throw new Error('Demo image not found');
+        const blob=await res.blob();
+        await safeLoadImage(new File([blob],'demo-spla3.jpg',{type:blob.type}));
+      }catch(e){ alert('デモ画像がありません。手元のスクショを読み込んでください。'); }
     }
 
-    function preprocess(grayCtx) {
-      // シンプルな2値化（閾値は固定）。必要に応じてOtsu等に変更。
-      const {canvas} = grayCtx;
-      const img = grayCtx.getImageData(0,0,canvas.width,canvas.height);
-      const data = img.data;
-      for (let i=0; i<data.length; i+=4) {
-        const r=data[i], g=data[i+1], b=data[i+2];
-        const v = (r*0.299 + g*0.587 + b*0.114)|0;
-        const t = v > 140 ? 255 : 0; // 閾値 140（仮）
-        data[i]=data[i+1]=data[i+2]=t; data[i+3]=255;
-      }
-      grayCtx.putImageData(img,0,0);
-      return grayCtx.canvas;
-    }
+    const ROIS={ result:{x:0.04,y:0.06,w:0.18,h:0.08}, kd:{x:0.74,y:0.62,w:0.20,h:0.10}, paint:{x:0.78,y:0.80,w:0.16,h:0.08}, stage:{x:0.33,y:0.18,w:0.34,h:0.08}, mode:{x:0.33,y:0.11,w:0.34,h:0.06}, weapon:{x:0.16,y:0.62,w:0.28,h:0.10} };
+    function cropToCanvas(src,roi){ const w=src.width,h=src.height; const sx=Math.round(roi.x*w), sy=Math.round(roi.y*h), sw=Math.round(roi.w*w), sh=Math.round(roi.h*h); const out=document.createElement('canvas'); out.width=sw; out.height=sh; out.getContext('2d').drawImage(src,sx,sy,sw,sh,0,0,sw,sh); return out; }
+    function binarize(ctx){ const c=ctx.canvas; const img=ctx.getImageData(0,0,c.width,c.height); const d=img.data; for(let i=0;i<d.length;i+=4){ const r=d[i],g=d[i+1],b=d[i+2]; const v=(r*299+g*587+b*114)/1000|0; const t=v>140?255:0; d[i]=t; d[i+1]=t; d[i+2]=t; d[i+3]=255; } ctx.putImageData(img,0,0); return ctx.canvas; }
+    function toUpper(s){ return (s||'').toString().toUpperCase(); }
+    function removeAllSpaces(s){ if(!s) return ''; let out=''; for(const ch of s){ const code=ch.charCodeAt(0); if(code>32) out+=ch; } return out; }
+    function keepDigits(s){ if(!s) return ''; let out=''; for(const ch of s){ if(ch>='0'&&ch<='9') out+=ch; } return out; }
+    function normalizeSpaces(s){ if(!s) return ''; let t=''; for(const ch of s){ const code=ch.charCodeAt(0); t+= (code<=32)? ' ' : ch; } const parts=t.split(' '); const outParts=[]; for(const p of parts){ if(p) outParts.push(p); } return outParts.join(' '); }
+    function extractNumbersInOrder(s){ const nums=[]; let cur=''; for(const ch of s){ if(ch>='0'&&ch<='9'){ cur+=ch; } else { if(cur.length>0){ nums.push(parseInt(cur,10)); cur=''; } } } if(cur.length>0){ nums.push(parseInt(cur,10)); } return nums; }
 
-    async function ocrCanvas(canvas, lang='jpn') {
-      const worker = await Tesseract.createWorker(lang);
-      const { data:{ text } } = await worker.recognize(canvas);
-      await worker.terminate();
-      return (text||'').replace(/[\t\r]+/g,' ').trim();
-    }
-
-    function parseKD(text) {
-      // 例フォーマット："12(3)  7" / "12/7/3" 等に雑に対応
-      const t = text.replace(/\s+/g,'').replace(/[（）]/g,'(');
-      // パターン1: 12(3)7 → K=12, A=3, D=7
-      let m = t.match(/(\d+)[(（](\d+)[)）](\d+)/);
-      if (m) return {kills:+m[1], assists:+m[2], deaths:+m[3]};
-      // パターン2: 12/7/3 → K/D/A
-      m = t.match(/(\d+)\/(\d+)\/(\d+)/);
-      if (m) return {kills:+m[1], deaths:+m[2], assists:+m[3]};
-      // 単独数字だけ抽出（弱いフォールバック）
-      const ns = (t.match(/\d+/g)||[]).map(Number);
-      if (ns.length >= 2) return {kills:ns[0], deaths:ns[1], assists:ns[2]||''};
-      return {};
-    }
-
-    async function autoAnalyze() {
-      const canvas = $('preview');
-      if (!state.imageBitmap) return;
-      const ctx = canvas.getContext('2d');
-
-      // 各領域を切り出し → 前処理 → OCR
-      const out = {};
-      const roiNames = ['result','kd','paint','stage','mode','weapon'];
-      for (const name of roiNames) {
-        const roi = ROIS[name];
-        const crop = cropToCanvas(canvas, roi);
-        const gctx = crop.getContext('2d');
-        const bin = preprocess(gctx);
-        try {
-          const lang = (name==='weapon' || name==='stage' || name==='mode') ? 'jpn' : 'eng';
-          const txt = await ocrCanvas(bin, lang);
-          out[name] = txt;
-        } catch(e) {
-          out[name] = '';
+    async function ocrCanvasSimple(c, lang){
+      try{
+        const res = await Tesseract.recognize(c, lang||'eng');
+        const text = (res && res.data && res.data.text) ? res.data.text : '';
+        return text.replace(/\t/g,' ').replace(/\n/g,' ').trim();
+      }catch(e){
+        // フォールバック（英語）
+        try{
+          const res2 = await Tesseract.recognize(c, 'eng');
+          const text2 = (res2 && res2.data && res2.data.text) ? res2.data.text : '';
+          return text2.replace(/\t/g,' ').replace(/\n/g,' ').trim();
+        }catch(e2){
+          return '';
         }
       }
+    }
 
-      // 勝敗の判定（OCR文字列から簡易推定）
-      let result = '';
-      const rtxt = (out.result||'').toUpperCase();
-      if (/(WIN|VICTORY|WIN!)/.test(rtxt)) result = 'WIN';
-      else if (/(LOSE|DEFEAT|LOST)/.test(rtxt)) result = 'LOSE';
+    function parseKD(text){ const ns=extractNumbersInOrder(removeAllSpaces(text)); const out={}; if(ns.length>=1) out.kills=ns[0]; if(ns.length>=2) out.deaths=ns[1]; if(ns.length>=3) out.assists=ns[2]; return out; }
 
-      // KD 解析
-      const kd = parseKD(out.kd||'');
-
-      // 数値欄は数字以外を除去
-      const paintNum = (out.paint||'').replace(/[^0-9]/g,'');
-
-      const v = {
-        matchAt: new Date().toISOString().slice(0,16).replace('T',' '),
-        result,
-        mode: (out.mode||'').replace(/\s+/g,' ').trim(),
-        stage: (out.stage||'').replace(/\s+/g,' ').trim(),
-        weapon: (out.weapon||'').replace(/\s+/g,' ').trim(),
-        kills: kd.kills ?? '',
-        deaths: kd.deaths ?? '',
-        assists: kd.assists ?? '',
-        specials: '', // 別領域を定義して抽出予定
-        paint: paintNum,
-        note: ''
-      };
+    async function autoAnalyze(){
+      const canvas=$("preview"); if(!state.imageBitmap) return;
+      const out={}; const names=["result","kd","paint","stage","mode","weapon"];
+      for(const name of names){
+        const roi=ROIS[name];
+        const crop=cropToCanvas(canvas,roi);
+        const g=crop.getContext('2d');
+        const bin=binarize(g);
+        try{ const lang=(name==="weapon"||name==="stage"||name==="mode")? "jpn" : "eng"; const txt=await ocrCanvasSimple(bin,lang); out[name]=txt; }catch(e){ out[name]=''; }
+      }
+      let result=''; const r=toUpper(out.result||''); if(r.indexOf('WIN')>=0 || r.indexOf('VICTORY')>=0) result='WIN'; else if(r.indexOf('LOSE')>=0 || r.indexOf('DEFEAT')>=0 || r.indexOf('LOST')>=0) result='LOSE';
+      const kd=parseKD(out.kd||''); const paintNum=keepDigits(out.paint||'');
+      const v={ matchAt:new Date().toISOString().slice(0,16).replace('T',' '), result:result, mode:normalizeSpaces(out.mode||''), stage:normalizeSpaces(out.stage||''), weapon:normalizeSpaces(out.weapon||''), kills: kd.kills||'', deaths: kd.deaths||'', assists: kd.assists||'', specials:'', paint: paintNum, note:'' };
       setValues(v);
       alert('自動解析が完了しました。誤認識は手で直してください。');
     }
 
-    // ---- イベント ----
-    $('pick').addEventListener('click', () => $('file').click());
-    $('demo').addEventListener('click', loadDemo);
+    $("pick").addEventListener('click',()=> $("file").click());
+    $("demo").addEventListener('click',loadDemo);
+    $("file").addEventListener('change', async (e)=>{ const f=e.target.files && e.target.files[0]; if(!f) return; await safeLoadImage(f); });
+    const drop=$("drop");
+    drop.addEventListener('click',()=> $("file").click());
+    drop.addEventListener('dragover',(e)=>{ e.preventDefault(); drop.classList.add('drag'); });
+    drop.addEventListener('dragleave',()=> drop.classList.remove('drag'));
+    drop.addEventListener('drop', async (e)=>{ e.preventDefault(); drop.classList.remove('drag'); const f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if(!f) return; await safeLoadImage(f); });
 
-    $('file').addEventListener('change', async (e)=>{
-      const f = e.target.files?.[0]; if (!f) return;
-      await loadImage(f);
+    $("auto").addEventListener('click',autoAnalyze);
+    $("reset").addEventListener('click',()=>{ location.reload(); });
+
+    $("copyCsv").addEventListener('click',async ()=>{
+      const row=fmtRow(values());
+      try{
+        await navigator.clipboard.writeText(row);
+        alert('CSV 1行をコピーしました。');
+      }catch(err){
+        // クリップボード不可時のフォールバック
+        const ok = confirm('クリップボードに書き込めませんでした。代わりにCSVをダウンロードしますか？');
+        if(ok){ download('spla_row.csv', row + String.fromCharCode(10)); }
+      }
     });
 
-    const drop = $('drop');
-    drop.addEventListener('dragover', (e)=>{ e.preventDefault(); drop.classList.add('drag'); });
-    drop.addEventListener('dragleave', ()=> drop.classList.remove('drag'));
-    drop.addEventListener('drop', async (e)=>{
-      e.preventDefault(); drop.classList.remove('drag');
-      const f = e.dataTransfer.files?.[0]; if (!f) return;
-      await loadImage(f);
-    });
+    $("append").addEventListener('click',()=>{ const v=values(); state.rows.push(v); saveRows(); renderTable(); });
+    $("exportCsv").addEventListener('click',()=>{ const NL=String.fromCharCode(10); const header=['日時','勝敗','ルール','ステージ','ブキ','K','D','A','SP','塗り','備考'].join(',')+NL; const body=state.rows.map(fmtRow).join(NL); download('splatoon3_records.csv', header + body + (body? NL:'')); });
+    $("clearAll").addEventListener('click',()=>{ if(!confirm('ローカルの記録を全消去します。よろしいですか？')) return; state.rows=[]; saveRows(); renderTable(); });
 
-    $('auto').addEventListener('click', autoAnalyze);
-    $('reset').addEventListener('click', ()=>{ location.reload(); });
-
-    $('copyCsv').addEventListener('click', ()=>{
-      const row = fmtRow(values());
-      navigator.clipboard.writeText(row);
-      alert('CSV 1行をコピーしました。');
-    });
-
-    $('append').addEventListener('click', ()=>{
-      const v = values();
-      state.rows.push(v); saveRows(); renderTable();
-    });
-
-    $('exportCsv').addEventListener('click', ()=>{
-      const header = '日時,勝敗,ルール,ステージ,ブキ,K,D,A,SP,塗り,備考\n';
-      const body = state.rows.map(fmtRow).join('\n');
-      download('splatoon3_records.csv', header + body + (body? '\n':''));
-    });
-
-    $('clearAll').addEventListener('click', ()=>{
-      if (!confirm('ローカルの記録を全消去します。よろしいですか？')) return;
-      state.rows = []; saveRows(); renderTable();
-    });
-
-    // 初期化
+    // 初期表示
     renderTable();
   </script>
 </body>
