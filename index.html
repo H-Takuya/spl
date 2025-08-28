@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Splatoon3 戦績OCR（MVP復旧版・修正版）</title>
+  <title>Splatoon3 戦績OCR（辞書補正・縦画像/HEIC対応）</title>
   <style>
     :root { --bg:#0b0b10; --panel:#141420; --text:#e5e7eb; --muted:#9aa0a6; --accent:#22c55e; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background:var(--bg); color:var(--text); }
@@ -34,19 +34,20 @@
     .pill { font-size:12px; padding:4px 8px; border-radius:999px; background:#0f172a; border:1px solid #27324f; }
   </style>
   <script src="https://unpkg.com/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+  <script src="https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js"></script>
 </head>
 <body>
   <header>
-    <h1>Splatoon3 戦績OCR（ブラウザのみ／ローカル保存・復旧版）</h1>
+    <h1>Splatoon3 戦績OCR（ブラウザのみ／ローカル保存／辞書補正）</h1>
   </header>
   <main>
     <section class="card">
       <div class="section">
         <div id="drop" class="dropzone">
           <strong>スクショをドラッグ＆ドロップ</strong><br>
-          <small>PNG/JPG 推奨。端末内でのみ処理します。</small>
+          <small>PNG/JPG/HEIC 可（端末内のみ処理）。縦長は自動回転。</small>
           <div style="height:8px"></div>
-          <input id="file" type="file" accept="image/*" style="display:none" />
+          <input id="file" type="file" accept="image/*,.heic,.HEIC,.heif,.HEIF" style="display:none" />
           <div class="row" style="justify-content:center">
             <button id="pick" class="btn">ファイルを選ぶ</button>
             <button id="demo" class="btn">デモ画像</button>
@@ -71,7 +72,7 @@
       <div class="section">
         <div class="row" style="justify-content:space-between; align-items:flex-end">
           <div>
-            <div style="font-size:16px; font-weight:700;">抽出結果（編集可）</div>
+            <div style="font-size:16px; font-weight:700;">抽出結果（編集可・辞書補正ON）</div>
             <small class="muted">誤認識は上書きしてください。ローカル保存。</small>
           </div>
           <div class="row">
@@ -171,14 +172,60 @@
     const FIELDS = ["matchAt","result","mode","stage","weapon","kills","deaths","assists","specials","paint","note"];
     const state = { image:null, imageBitmap:null, width:0, height:0, scaleX:1, scaleY:1, rows: JSON.parse(localStorage.getItem("spla-rows")||"[]") };
 
-    function drawPreview(){
-      const c=$("preview");
-      const x=c.getContext("2d");
-      x.clearRect(0,0,c.width,c.height);
-      if(!state.imageBitmap) return;
-      c.width=state.width; c.height=state.height;
-      x.drawImage(state.imageBitmap,0,0,state.width,state.height);
+    //--- 既知辞書（最小限） ---
+    const MODES = [
+      'レギュラーマッチ','バンカラマッチ','バンカラマッチ（オープン）','バンカラマッチ（チャレンジ）','Xマッチ','フェス（オープン）','フェス（チャレンジ）','プライベートマッチ','サーモンラン'
+    ];
+    const STAGES = [
+      'マテガイ放水路','ナメロウ金属','ユノハナ大渓谷','ゴンズイ地区','チョウザメ造船','キンメダイ美術館','マヒマヒリゾート＆スパ','ザトウマーケット','スメーシーワールド','マサバ海峡大橋','マンタマリア号','タラポートショッピングパーク','海女美術大学','ショッツル鉱山','アロワナモール','ネギトロ炭鉱'
+    ];
+    const WEAPONS = [
+      'わかばシューター','もみじシューター','スプラシューター','プロモデラーMG','N-ZAP85','.52ガロン','.96ガロン','ジェットスイーパー','プライムシューター','シャープマーカー','ボールドマーカー',
+      'スプラローラー','ダイナモローラー','カーボンローラー','スプラマニューバー','デュアルスイーパー','スパッタリー','クアッドホッパーブラック','パラシェルター',
+      'ノヴァブラスター','ラピッドブラスター','ロングブラスター','クラッシュブラスター',
+      'リッター4K','スプラチャージャー','スクイックリンα',
+      'スプラスピナー','バレルスピナー','ハイドラント'
+    ];
+
+    //--- 文字正規化＆ファジーマッチ ---
+    function hiraganaToKatakana(s){
+      return (s||'').replace(/[\u3041-\u3096]/g, ch => String.fromCharCode(ch.charCodeAt(0)+0x60));
     }
+    function zenkakuToHankaku(s){
+      return (s||'').replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0xFEE0))
+                     .replace(/　/g,' ');
+    }
+    function jaNormalize(s){
+      let t = s||'';
+      t = t.replace(/\s+/g,' ').trim();
+      t = zenkakuToHankaku(t);
+      t = hiraganaToKatakana(t);
+      t = t.replace(/["'`\[\]{}()]/g,'');
+      return t;
+    }
+    function levenshtein(a,b){
+      a = a||''; b = b||''; const m=a.length, n=b.length; const dp=Array.from({length:m+1},()=>Array(n+1).fill(0));
+      for(let i=0;i<=m;i++) dp[i][0]=i; for(let j=0;j<=n;j++) dp[0][j]=j;
+      for(let i=1;i<=m;i++) for(let j=1;j<=n;j++){
+        const cost = a[i-1]===b[j-1]?0:1; dp[i][j]=Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+cost);
+      }
+      return dp[m][n];
+    }
+    function bestMatch(src, candidates){
+      const s = jaNormalize(src);
+      let best={label:'',score:0};
+      for(const c of candidates){
+        const t = jaNormalize(c);
+        const d = levenshtein(s,t);
+        const denom = Math.max(1, Math.max(s.length, t.length));
+        const score = 1 - d/denom; // 0..1
+        if(score>best.score) best={label:c,score};
+      }
+      return best; // {label, score}
+    }
+
+    // ---------- 基本描画 ----------
+    function drawPreview(){ const c=$("preview"), x=c.getContext("2d"); x.clearRect(0,0,c.width,c.height); if(!state.imageBitmap) return; c.width=state.width; c.height=state.height; x.drawImage(state.imageBitmap,0,0,state.width,state.height); }
     function setImgMeta(){ const t = state.image? (state.image.name+"  /  "+state.width+"×"+state.height) : "画像未読込"; $("imgMeta").textContent=t; }
     function enableImageActions(b){ $("auto").disabled=!b; $("reset").disabled=!b; $("copyCsv").disabled=false; $("append").disabled=false; }
     function values(){ const v={}; for(const k of FIELDS){ v[k]=($(k).value||"").toString().trim(); } return v; }
@@ -189,108 +236,89 @@
     function saveRows(){ localStorage.setItem('spla-rows', JSON.stringify(state.rows)); }
     function download(name,text){ const blob=new Blob([text],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; a.click(); URL.revokeObjectURL(url); }
 
-    async function safeLoadImage(file){
-      try{
-        if(!file) throw new Error('ファイル未選択');
-        if(!file.type || !file.type.startsWith('image/')) throw new Error('画像ファイルではありません');
-        let bmp=null;
-        try{
-          bmp=await createImageBitmap(file);
-        }catch(e){
-          const dataUrl=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(file); });
-          bmp=await new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>res(createImageBitmap(img)); img.onerror=()=>rej(new Error('画像の読み込みに失敗しました')); img.src=dataUrl; });
-        }
-        state.image=file; state.imageBitmap=bmp; state.width=bmp.width; state.height=bmp.height; state.scaleX=state.width/1920; state.scaleY=state.height/1080;
-        drawPreview(); setImgMeta(); enableImageActions(true);
-      }catch(err){
-        console.error(err);
-        alert('画像の読み込みに失敗しました。別のファイルで試すか、ブラウザを最新化してください。\n詳細: '+(err&&err.message?err.message:err));
-      }
-    }
+    // ---------- 画像ロード（HEIC/縦→横 回転対応） ----------
+    function isHeic(file){ const name=(file.name||''); return /\.heic$|\.heif$/i.test(name) || (file.type && /(heic|heif)/i.test(file.type)); }
+    async function heicToJpegFile(file){ const blob = await window.heic2any({ blob:file, toType:'image/jpeg', quality:0.92 }); const out = Array.isArray(blob) ? blob[0] : blob; return new File([out], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type:'image/jpeg' }); }
+    async function ensureLandscape(bmp){ if(bmp.width >= bmp.height) return bmp; const can = document.createElement('canvas'); can.width = bmp.height; can.height = bmp.width; const ctx = can.getContext('2d'); ctx.save(); ctx.translate(can.width/2, can.height/2); ctx.rotate(Math.PI/2); ctx.drawImage(bmp, -bmp.width/2, -bmp.height/2); ctx.restore(); return await createImageBitmap(can); }
+    async function fileToBitmap(file){ try{ return await createImageBitmap(file); }catch(e){ const dataUrl=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(file); }); return await new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>res(createImageBitmap(img)); img.onerror=()=>rej(new Error('画像の読み込みに失敗しました')); img.src=dataUrl; }); } }
+    async function safeLoadImage(file){ try{ if(!file) throw new Error('ファイル未選択'); if(isHeic(file)){ if(!window.heic2any) throw new Error('HEIC変換ライブラリの読み込みに失敗'); file = await heicToJpegFile(file); } if(!file.type || !file.type.startsWith('image/')) throw new Error('画像ファイルではありません'); let bmp = await fileToBitmap(file); bmp = await ensureLandscape(bmp); state.image=file; state.imageBitmap=bmp; state.width=bmp.width; state.height=bmp.height; state.scaleX=state.width/1920; state.scaleY=state.height/1080; drawPreview(); setImgMeta(); enableImageActions(true);}catch(err){ console.error(err); alert('画像の読み込みに失敗しました。\n詳細: '+(err&&err.message?err.message:err)); } }
+    async function loadDemo(){ try{ const res=await fetch('demo-spla3.jpg'); if(!res.ok) throw new Error('Demo image not found'); const blob=await res.blob(); await safeLoadImage(new File([blob],'demo-spla3.jpg',{type:blob.type})); }catch(e){ alert('デモ画像がありません。手元のスクショを読み込んでください。'); } }
 
-    async function loadDemo(){
-      try{
-        const res=await fetch('demo-spla3.jpg');
-        if(!res.ok) throw new Error('Demo image not found');
-        const blob=await res.blob();
-        await safeLoadImage(new File([blob],'demo-spla3.jpg',{type:blob.type}));
-      }catch(e){ alert('デモ画像がありません。手元のスクショを読み込んでください。'); }
-    }
+    // ---------- OCRユーティリティ（2倍拡大+2値化、二候補ROI） ----------
+    const ROI_SET_A={ result:{x:0.04,y:0.06,w:0.18,h:0.08}, kd:{x:0.74,y:0.62,w:0.20,h:0.10}, paint:{x:0.78,y:0.80,w:0.16,h:0.08}, stage:{x:0.33,y:0.18,w:0.34,h:0.08}, mode:{x:0.33,y:0.11,w:0.34,h:0.06}, weapon:{x:0.16,y:0.62,w:0.28,h:0.10} };
+    // 左のリスト寄り画面用のざっくり大きめROI（安全側）
+    const ROI_SET_B={ result:{x:0.05,y:0.10,w:0.22,h:0.12}, kd:{x:0.70,y:0.60,w:0.26,h:0.14}, paint:{x:0.75,y:0.78,w:0.20,h:0.10}, stage:{x:0.28,y:0.16,w:0.42,h:0.10}, mode:{x:0.28,y:0.08,w:0.42,h:0.08}, weapon:{x:0.12,y:0.58,w:0.34,h:0.14} };
 
-    const ROIS={ result:{x:0.04,y:0.06,w:0.18,h:0.08}, kd:{x:0.74,y:0.62,w:0.20,h:0.10}, paint:{x:0.78,y:0.80,w:0.16,h:0.08}, stage:{x:0.33,y:0.18,w:0.34,h:0.08}, mode:{x:0.33,y:0.11,w:0.34,h:0.06}, weapon:{x:0.16,y:0.62,w:0.28,h:0.10} };
     function cropToCanvas(src,roi){ const w=src.width,h=src.height; const sx=Math.round(roi.x*w), sy=Math.round(roi.y*h), sw=Math.round(roi.w*w), sh=Math.round(roi.h*h); const out=document.createElement('canvas'); out.width=sw; out.height=sh; out.getContext('2d').drawImage(src,sx,sy,sw,sh,0,0,sw,sh); return out; }
-    function binarize(ctx){ const c=ctx.canvas; const img=ctx.getImageData(0,0,c.width,c.height); const d=img.data; for(let i=0;i<d.length;i+=4){ const r=d[i],g=d[i+1],b=d[i+2]; const v=(r*299+g*587+b*114)/1000|0; const t=v>140?255:0; d[i]=t; d[i+1]=t; d[i+2]=t; d[i+3]=255; } ctx.putImageData(img,0,0); return ctx.canvas; }
-    function toUpper(s){ return (s||'').toString().toUpperCase(); }
-    function removeAllSpaces(s){ if(!s) return ''; let out=''; for(const ch of s){ const code=ch.charCodeAt(0); if(code>32) out+=ch; } return out; }
-    function keepDigits(s){ if(!s) return ''; let out=''; for(const ch of s){ if(ch>='0'&&ch<='9') out+=ch; } return out; }
-    function normalizeSpaces(s){ if(!s) return ''; let t=''; for(const ch of s){ const code=ch.charCodeAt(0); t+= (code<=32)? ' ' : ch; } const parts=t.split(' '); const outParts=[]; for(const p of parts){ if(p) outParts.push(p); } return outParts.join(' '); }
-    function extractNumbersInOrder(s){ const nums=[]; let cur=''; for(const ch of s){ if(ch>='0'&&ch<='9'){ cur+=ch; } else { if(cur.length>0){ nums.push(parseInt(cur,10)); cur=''; } } } if(cur.length>0){ nums.push(parseInt(cur,10)); } return nums; }
+    function upscaleCanvas(src, scale=2){ const out=document.createElement('canvas'); out.width = Math.max(1, Math.round(src.width*scale)); out.height = Math.max(1, Math.round(src.height*scale)); const ctx=out.getContext('2d'); ctx.imageSmoothingEnabled=false; ctx.drawImage(src,0,0,out.width,out.height); return out; }
+    function binarizeCanvas(src, threshold=150){ const c=document.createElement('canvas'); c.width=src.width; c.height=src.height; const ctx=c.getContext('2d'); ctx.drawImage(src,0,0); const img=ctx.getImageData(0,0,c.width,c.height); const d=img.data; for(let i=0;i<d.length;i+=4){ const r=d[i],g=d[i+1],b=d[i+2]; const v=(r*299+g*587+b*114)/1000|0; const t=v>threshold?255:0; d[i]=t; d[i+1]=t; d[i+2]=t; d[i+3]=255; } ctx.putImageData(img,0,0); return c; }
 
-    async function ocrCanvasSimple(c, lang){
-      try{
-        const res = await Tesseract.recognize(c, lang||'eng');
-        const text = (res && res.data && res.data.text) ? res.data.text : '';
-        return text.replace(/\t/g,' ').replace(/\n/g,' ').trim();
-      }catch(e){
-        // フォールバック（英語）
+    async function ocrCanvasWith(c, lang, params={}){ const options = Object.assign({ langPath:'https://tessdata.projectnaptha.com/4.0.0', tessedit_pageseg_mode:7 }, params); const res = await Tesseract.recognize(c, lang||'eng', options); const text = (res && res.data && res.data.text) ? res.data.text : ''; return text.replace(/\t/g,' ').replace(/\n/g,' ').trim(); }
+    function extractNumbersInOrder(s){ const nums=[]; let cur=''; for(const ch of s){ if(ch>='0'&&ch<='9'){ cur+=ch; } else { if(cur.length>0){ nums.push(parseInt(cur,10)); cur=''; } } } if(cur.length>0){ nums.push(parseInt(cur,10)); } return nums; }
+    function parseKD(text){ const ns=extractNumbersInOrder((text||'').replace(/\s+/g,'')); const out={}; if(ns.length>=1) out.kills=ns[0]; if(ns.length>=2) out.deaths=ns[1]; if(ns.length>=3) out.assists=ns[2]; return out; }
+
+    async function runOnceWithRoiSet(canvas, ROIS){
+      const out={};
+      const names=["result","kd","paint","stage","mode","weapon"];
+      for(const name of names){
+        const roi=ROIS[name]; const crop=cropToCanvas(canvas,roi); const big = upscaleCanvas(crop, 2.2); const bin=binarizeCanvas(big, name==='kd'||name==='paint'? 165 : 150);
         try{
-          const res2 = await Tesseract.recognize(c, 'eng');
-          const text2 = (res2 && res2.data && res2.data.text) ? res2.data.text : '';
-          return text2.replace(/\t/g,' ').replace(/\n/g,' ').trim();
-        }catch(e2){
-          return '';
-        }
+          if(name==="kd"||name==="paint"){
+            out[name] = await ocrCanvasWith(bin,'eng',{ tessedit_char_whitelist:'0123456789', tessedit_pageseg_mode:7 });
+          }else if(name==="result"){
+            out[name] = await ocrCanvasWith(bin,'eng',{ tessedit_char_whitelist:'ABCDEFGHIJKLMNOPQRSTUVWXYZ ', tessedit_pageseg_mode:7 });
+          }else{
+            out[name] = await ocrCanvasWith(bin,'jpn',{ tessedit_pageseg_mode:7 });
+            if(!out[name]) out[name] = await ocrCanvasWith(bin,'eng',{ tessedit_pageseg_mode:7 });
+          }
+        }catch(e){ out[name]=''; }
       }
+      return out;
     }
 
-    function parseKD(text){ const ns=extractNumbersInOrder(removeAllSpaces(text)); const out={}; if(ns.length>=1) out.kills=ns[0]; if(ns.length>=2) out.deaths=ns[1]; if(ns.length>=3) out.assists=ns[2]; return out; }
+    function postCorrect(out){
+      // 勝敗
+      let result=''; const r=(out.result||'').toUpperCase(); if(r.includes('WIN')||r.includes('VICTORY')) result='WIN'; else if(r.includes('LOSE')||r.includes('DEFEAT')||r.includes('LOST')) result='LOSE';
+      // 数値
+      const kd=parseKD(out.kd||''); const paintNum=(out.paint||'').replace(/[^0-9]/g,'');
+      // 辞書補正
+      const bmMode = bestMatch(out.mode||'', MODES);
+      const bmStage = bestMatch(out.stage||'', STAGES);
+      const bmWeapon = bestMatch(out.weapon||'', WEAPONS);
+      return {
+        matchAt:new Date().toISOString().slice(0,16).replace('T',' '),
+        result,
+        mode: bmMode.score>=0.55 ? bmMode.label : jaNormalize(out.mode||''),
+        stage: bmStage.score>=0.55 ? bmStage.label : jaNormalize(out.stage||''),
+        weapon: bmWeapon.score>=0.55 ? bmWeapon.label : jaNormalize(out.weapon||''),
+        kills: kd.kills||'', deaths: kd.deaths||'', assists: kd.assists||'', specials:'', paint: paintNum, note:''
+      };
+    }
 
     async function autoAnalyze(){
       const canvas=$("preview"); if(!state.imageBitmap) return;
-      const out={}; const names=["result","kd","paint","stage","mode","weapon"];
-      for(const name of names){
-        const roi=ROIS[name];
-        const crop=cropToCanvas(canvas,roi);
-        const g=crop.getContext('2d');
-        const bin=binarize(g);
-        try{ const lang=(name==="weapon"||name==="stage"||name==="mode")? "jpn" : "eng"; const txt=await ocrCanvasSimple(bin,lang); out[name]=txt; }catch(e){ out[name]=''; }
-      }
-      let result=''; const r=toUpper(out.result||''); if(r.indexOf('WIN')>=0 || r.indexOf('VICTORY')>=0) result='WIN'; else if(r.indexOf('LOSE')>=0 || r.indexOf('DEFEAT')>=0 || r.indexOf('LOST')>=0) result='LOSE';
-      const kd=parseKD(out.kd||''); const paintNum=keepDigits(out.paint||'');
-      const v={ matchAt:new Date().toISOString().slice(0,16).replace('T',' '), result:result, mode:normalizeSpaces(out.mode||''), stage:normalizeSpaces(out.stage||''), weapon:normalizeSpaces(out.weapon||''), kills: kd.kills||'', deaths: kd.deaths||'', assists: kd.assists||'', specials:'', paint: paintNum, note:'' };
+      const outA = await runOnceWithRoiSet(canvas, ROI_SET_A);
+      const outB = await runOnceWithRoiSet(canvas, ROI_SET_B);
+      const vA = postCorrect(outA); const vB = postCorrect(outB);
+      // スコア合計で良い方を採用
+      const scoreA = (bestMatch(outA.mode||'', MODES).score + bestMatch(outA.stage||'', STAGES).score + bestMatch(outA.weapon||'', WEAPONS).score);
+      const scoreB = (bestMatch(outB.mode||'', MODES).score + bestMatch(outB.stage||'', STAGES).score + bestMatch(outB.weapon||'', WEAPONS).score);
+      const v = scoreB>scoreA ? vB : vA;
       setValues(v);
       alert('自動解析が完了しました。誤認識は手で直してください。');
     }
 
+    // ---------- UIイベント ----------
     $("pick").addEventListener('click',()=> $("file").click());
     $("demo").addEventListener('click',loadDemo);
     $("file").addEventListener('change', async (e)=>{ const f=e.target.files && e.target.files[0]; if(!f) return; await safeLoadImage(f); });
-    const drop=$("drop");
-    drop.addEventListener('click',()=> $("file").click());
-    drop.addEventListener('dragover',(e)=>{ e.preventDefault(); drop.classList.add('drag'); });
-    drop.addEventListener('dragleave',()=> drop.classList.remove('drag'));
-    drop.addEventListener('drop', async (e)=>{ e.preventDefault(); drop.classList.remove('drag'); const f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if(!f) return; await safeLoadImage(f); });
-
-    $("auto").addEventListener('click',autoAnalyze);
-    $("reset").addEventListener('click',()=>{ location.reload(); });
-
-    $("copyCsv").addEventListener('click',async ()=>{
-      const row=fmtRow(values());
-      try{
-        await navigator.clipboard.writeText(row);
-        alert('CSV 1行をコピーしました。');
-      }catch(err){
-        // クリップボード不可時のフォールバック
-        const ok = confirm('クリップボードに書き込めませんでした。代わりにCSVをダウンロードしますか？');
-        if(ok){ download('spla_row.csv', row + String.fromCharCode(10)); }
-      }
-    });
-
+    const drop=$("drop"); drop.addEventListener('click',()=> $("file").click()); drop.addEventListener('dragover',(e)=>{ e.preventDefault(); drop.classList.add('drag'); }); drop.addEventListener('dragleave',()=> drop.classList.remove('drag')); drop.addEventListener('drop', async (e)=>{ e.preventDefault(); drop.classList.remove('drag'); const f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if(!f) return; await safeLoadImage(f); });
+    $("auto").addEventListener('click',autoAnalyze); $("reset").addEventListener('click',()=>{ location.reload(); });
+    $("copyCsv").addEventListener('click',async ()=>{ const row=fmtRow(values()); try{ await navigator.clipboard.writeText(row); alert('CSV 1行をコピーしました。'); }catch(err){ const ok = confirm('クリップボードに書き込めませんでした。代わりにCSVをダウンロードしますか？'); if(ok){ download('spla_row.csv', row + String.fromCharCode(10)); } } });
     $("append").addEventListener('click',()=>{ const v=values(); state.rows.push(v); saveRows(); renderTable(); });
     $("exportCsv").addEventListener('click',()=>{ const NL=String.fromCharCode(10); const header=['日時','勝敗','ルール','ステージ','ブキ','K','D','A','SP','塗り','備考'].join(',')+NL; const body=state.rows.map(fmtRow).join(NL); download('splatoon3_records.csv', header + body + (body? NL:'')); });
     $("clearAll").addEventListener('click',()=>{ if(!confirm('ローカルの記録を全消去します。よろしいですか？')) return; state.rows=[]; saveRows(); renderTable(); });
 
-    // 初期表示
     renderTable();
   </script>
 </body>
