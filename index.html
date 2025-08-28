@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Splatoon3 戦績OCR（CSPセーフ版／辞書補正・HEIC対応）</title>
+  <title>Splatoon3 戦績OCR（CSPセーフ・Chrome向け修正版）</title>
   <style>
     :root { --bg:#0b0b10; --panel:#141420; --text:#e5e7eb; --muted:#9aa0a6; --accent:#22c55e; }
     body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background:var(--bg); color:var(--text); }
@@ -34,9 +34,7 @@
     .pill { font-size:12px; padding:4px 8px; border-radius:999px; background:#0f172a; border:1px solid #27324f; }
     .hint { font-size:12px; color:#a7f3d0; background:#052e16; border:1px solid #14532d; padding:6px 8px; border-radius:8px; }
   </style>
-  <!-- NOTE: tesseract.js を読み込むと CSP の 'unsafe-eval' 制約で EvalError になる環境があるため、ここでは読み込みません。 -->
-  <!-- HEIC 変換のみ使用（CSPに影響なし） -->
-  <script src="https://unpkg.com/heic2any@0.0.4/dist/heic2any.min.js"></script>
+  <!-- CSP回避のため tesseract.js は読み込まない。HEICは必要時に遅延ロード（CSPで失敗する場合あり） -->
 </head>
 <body>
   <header>
@@ -49,7 +47,7 @@
           <strong>スクショをドラッグ＆ドロップ</strong><br>
           <small>PNG/JPG/HEIC 可（端末内のみ画像処理・OCRは選択制）</small>
           <div style="height:8px"></div>
-          <input id="file" type="file" accept="image/*,.heic,.HEIC,.heif,.HEIF" style="display:none" />
+          <input id="file" type="file" accept="image/png,image/jpeg" style="display:none" />
           <div class="row" style="justify-content:center">
             <button id="pick" class="btn">ファイルを選ぶ</button>
             <button id="demo" class="btn">デモ画像</button>
@@ -83,14 +81,13 @@
           </div>
         </div>
         <div style="height:12px"></div>
-        <!-- OCR エンジン設定（デフォルトはローカルOCRなしでCSP安全） -->
         <div class="row" style="align-items:center; gap:12px; margin-bottom:8px">
-          <label class="hint">この環境では <code>unsafe-eval</code> が禁止されているため Tesseract.js は使えません。必要ならオンラインOCRを有効にしてください。</label>
+          <label class="hint">この環境では <code>unsafe-eval</code> が禁止のため Tesseract.js は使用しません。<br>Windows 10 + Chrome は <code>TextDetector</code> 非対応のため、必要なら「オンラインOCR」をONにしてください（外部送信）。</label>
         </div>
         <div class="grid" style="margin-bottom:8px">
           <div>
             <label><input type="checkbox" id="useOnlineOcr"> オンラインOCR（OCR.space / β）を使う</label>
-            <small class="muted">※ 画像は外部APIに送信されます。既定ではデモキー（制限あり）を使用。</small>
+            <small class="muted">※ 画像は外部APIに送信されます。既定はデモキー（制限あり）。</small>
           </div>
           <div>
             <label>OCR.space API Key（任意）</label>
@@ -198,6 +195,7 @@
     function drawPreview(){ const c=$("preview"), x=c.getContext("2d"); x.clearRect(0,0,c.width,c.height); if(!state.imageBitmap) return; c.width=state.width; c.height=state.height; x.drawImage(state.imageBitmap,0,0,state.width,state.height); }
     function setImgMeta(){ const t = state.image? (state.image.name+"  /  "+state.width+"×"+state.height) : "画像未読込"; $("imgMeta").textContent=t; }
     function enableImageActions(b){ $("auto").disabled=!b; $("reset").disabled=!b; $("copyCsv").disabled=false; $("append").disabled=false; }
+    function setBusy(b){ const autoBtn=$("auto"); if(!autoBtn) return; autoBtn.disabled = b; autoBtn.dataset.label = autoBtn.dataset.label || autoBtn.textContent; autoBtn.textContent = b ? '解析中…' : autoBtn.dataset.label; }
     function values(){ const v={}; for(const k of FIELDS){ v[k]=($(k).value||"").toString().trim(); } return v; }
     function setValues(v){ for(const k of FIELDS){ if(k in v) $(k).value = v[k]!==undefined && v[k]!==null ? v[k] : ""; } }
     function csvEscape(s){ const t=(s||"").toString(); if(t.indexOf('"')>=0 || t.indexOf(',')>=0 || t.indexOf(String.fromCharCode(10))>=0){ return '"'+t.split('"').join('""')+'"'; } return t; }
@@ -206,12 +204,39 @@
     function saveRows(){ localStorage.setItem('spla-rows', JSON.stringify(state.rows)); }
     function download(name,text){ const blob=new Blob([text],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; a.click(); URL.revokeObjectURL(url); }
 
+    // HEICライブラリ遅延ロード（必要時のみ読み込み）
+    /* HEICライブラリはCSPの影響を受けるため使用しない（PNG/JPGのみ対応） */);
+    }
+
     // 画像ロード（HEIC/縦→横 回転対応）
     function isHeic(file){ const name=(file.name||''); return /\.heic$|\.heif$/i.test(name) || (file.type && /(heic|heif)/i.test(file.type)); }
-    async function heicToJpegFile(file){ const blob = await window.heic2any({ blob:file, toType:'image/jpeg', quality:0.92 }); const out = Array.isArray(blob) ? blob[0] : blob; return new File([out], file.name.replace(/\.(heic|heif)$/i, '.jpg'), { type:'image/jpeg' }); }
-    async function ensureLandscape(bmp){ if(bmp.width >= bmp.height) return bmp; const can = document.createElement('canvas'); can.width = bmp.height; can.height = bmp.width; const ctx = can.getContext('2d'); ctx.save(); ctx.translate(can.width/2, can.height/2); ctx.rotate(Math.PI/2); ctx.drawImage(bmp, -bmp.width/2, -bmp.height/2); ctx.restore(); return await createImageBitmap(can); }
+    async function heicToJpegFile(file){
+      throw new Error('HEICは未対応です。PNG/JPGに変換してから読み込んでください。');
+    }
+    async function ensureLandscape(bmp){ if(bmp.width >= bmp.height) return bmp; const can = document.createElement('canvas'); can.width = bmp.height; can.height = bmp.width; const ctx = can.getContext('2d'); ctx.save(); ctx.translate(can.width/2, can.height/2); ctx.rotate(Math.PI/2); ctx.drawImage(bmp, -bmp.width/2, -bmp.height/2); ctx.restore(); return await createImageBitmap(can); }(bmp){ if(bmp.width >= bmp.height) return bmp; const can = document.createElement('canvas'); can.width = bmp.height; can.height = bmp.width; const ctx = can.getContext('2d'); ctx.save(); ctx.translate(can.width/2, can.height/2); ctx.rotate(Math.PI/2); ctx.drawImage(bmp, -bmp.width/2, -bmp.height/2); ctx.restore(); return await createImageBitmap(can); }
     async function fileToBitmap(file){ try{ return await createImageBitmap(file); }catch(e){ const dataUrl=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(file); }); return await new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>res(createImageBitmap(img)); img.onerror=()=>rej(new Error('画像の読み込みに失敗しました')); img.src=dataUrl; }); } }
-    async function safeLoadImage(file){ try{ if(!file) throw new Error('ファイル未選択'); if(isHeic(file)){ if(!window.heic2any) throw new Error('HEIC変換ライブラリの読み込みに失敗'); file = await heicToJpegFile(file); } if(!file.type || !file.type.startsWith('image/')) throw new Error('画像ファイルではありません'); let bmp = await fileToBitmap(file); bmp = await ensureLandscape(bmp); state.image=file; state.imageBitmap=bmp; state.width=bmp.width; state.height=bmp.height; state.scaleX=state.width/1920; state.scaleY=state.height/1080; drawPreview(); setImgMeta(); enableImageActions(true);}catch(err){ console.error(err); alert('画像の読み込みに失敗しました。\n詳細: '+(err&&err.message?err.message:err)); } }
+    async function safeLoadImage(file){
+      try{
+        if(!file) throw new Error('ファイル未選択');
+        if(isHeic(file)){
+          throw new Error('HEICは未対応です。PNG/JPGに変換してから再試行してください。');
+        }
+        if(!file.type || !file.type.startsWith('image/')) throw new Error('画像ファイルではありません');
+        let bmp = await fileToBitmap(file);
+        bmp = await ensureLandscape(bmp);
+        state.image=file; state.imageBitmap=bmp; state.width=bmp.width; state.height=bmp.height; state.scaleX=state.width/1920; state.scaleY=state.height/1080;
+        drawPreview(); setImgMeta(); enableImageActions(true);
+        // TextDetector 非対応かつオンラインOCR未許可なら案内
+        const needOnline = !('TextDetector' in window);
+        if(needOnline && !$("useOnlineOcr").checked){
+          const ok = confirm('このブラウザではローカルOCRが使えません。オンラインOCR（外部送信）を有効にしますか？');
+          if(ok) $("useOnlineOcr").checked = true;
+        }
+      }catch(err){
+        console.error(err);
+        alert('画像の読み込みに失敗しました。\n詳細: '+(err&&err.message?err.message:err));
+      }
+    }
     async function loadDemo(){ try{ const res=await fetch('demo-spla3.jpg'); if(!res.ok) throw new Error('Demo image not found'); const blob=await res.blob(); await safeLoadImage(new File([blob],'demo-spla3.jpg',{type:blob.type})); }catch(e){ alert('デモ画像がありません。手元のスクショを読み込んでください。'); } }
 
     // ROI（2系統）
@@ -222,8 +247,6 @@
     function binarizeCanvas(src, threshold=150){ const c=document.createElement('canvas'); c.width=src.width; c.height=src.height; const ctx=c.getContext('2d'); ctx.drawImage(src,0,0); const img=ctx.getImageData(0,0,c.width,c.height); const d=img.data; for(let i=0;i<d.length;i+=4){ const r=d[i],g=d[i+1],b=d[i+2]; const v=(r*299+g*587+b*114)/1000|0; const t=v>threshold?255:0; d[i]=t; d[i+1]=t; d[i+2]=t; d[i+3]=255; } ctx.putImageData(img,0,0); return c; }
 
     // ----------- OCR 実装（CSPセーフ） -----------
-    function isUnsafeEvalBlocked(){ try{ new Function('return 1')(); return false; } catch(e){ return true; } }
-
     async function ocrSpace(canvas, lang){
       const apiKey = ($("ocrApiKey").value||'').trim() || 'helloworld'; // demo key
       const dataUrl = canvas.toDataURL('image/png');
@@ -273,7 +296,10 @@
       const out={};
       const names=["result","kd","paint","stage","mode","weapon"];
       for(const name of names){
-        const roi=ROIS[name]; const crop=cropToCanvas(canvas,roi); const big=upscaleCanvas(crop, 2.2); const bin=binarizeCanvas(big, name==='kd'||name==='paint'? 165 : 150);
+        const roi=ROIS[name];
+        const crop=cropToCanvas(canvas,roi);
+        const big=upscaleCanvas(crop, 2.2);
+        const bin=binarizeCanvas(big, name==='kd'||name==='paint'? 165 : 150);
         try{
           if(name==="kd"||name==="paint"){ out[name] = await detectAndOcr(bin,'eng','num'); }
           else if(name==="result"){ out[name] = await detectAndOcr(bin,'eng','word'); }
@@ -284,16 +310,34 @@
     }
 
     function postCorrect(out){
-      let result=''; const r=(out.result||'').toUpperCase(); if(r.includes('WIN')||r.includes('VICTORY')) result='WIN'; else if(r.includes('LOSE')||r.includes('DEFEAT')||r.includes('LOST')) result='LOSE';
-      const kd=parseKD(out.kd||''); const paintNum=(out.paint||'').replace(/[^0-9]/g,'');
+      let result='';
+      const r=(out.result||'').toUpperCase();
+      if(r.includes('WIN')||r.includes('VICTORY')) result='WIN';
+      else if(r.includes('LOSE')||r.includes('DEFEAT')||r.includes('LOST')) result='LOSE';
+      const kd=parseKD(out.kd||'');
+      const paintNum=(out.paint||'').replace(/[^0-9]/g,'');
       const bmMode = bestMatch(out.mode||'', MODES);
       const bmStage = bestMatch(out.stage||'', STAGES);
       const bmWeapon = bestMatch(out.weapon||'', WEAPONS);
-      return { matchAt:new Date().toISOString().slice(0,16).replace('T',' '), result, mode: bmMode.score>=0.55 ? bmMode.label : jaNormalize(out.mode||''), stage: bmStage.score>=0.55 ? bmStage.label : jaNormalize(out.stage||''), weapon: bmWeapon.score>=0.55 ? bmWeapon.label : jaNormalize(out.weapon||''), kills: kd.kills||'', deaths: kd.deaths||'', assists: kd.assists||'', specials:'', paint: paintNum, note:'' };
+      return {
+        matchAt:new Date().toISOString().slice(0,16).replace('T',' '),
+        result,
+        mode: bmMode.score>=0.55 ? bmMode.label : jaNormalize(out.mode||''),
+        stage: bmStage.score>=0.55 ? bmStage.label : jaNormalize(out.stage||''),
+        weapon: bmWeapon.score>=0.55 ? bmWeapon.label : jaNormalize(out.weapon||''),
+        kills: (kd.kills !== undefined ? String(kd.kills) : ''), deaths: (kd.deaths !== undefined ? String(kd.deaths) : ''), assists: (kd.assists !== undefined ? String(kd.assists) : ''), specials:'', paint: paintNum, note:''
+      };
     }
 
     async function autoAnalyze(){
       const canvas=$("preview"); if(!state.imageBitmap) return;
+      // ガード: TextDetectorなし & オンラインOCR未許可なら促す
+      if(!('TextDetector' in window) && !$("useOnlineOcr").checked){
+        const ok = confirm('このブラウザではローカルOCRが使えません。オンラインOCR（外部送信）を有効にしますか？');
+        if(ok) { $("useOnlineOcr").checked = true; }
+        else { alert('オンラインOCRを有効にするか、手入力で補完してください。'); return; }
+      }
+      setBusy(true);
       try{
         const outA = await runOnceWithRoiSet(canvas, ROI_SET_A);
         const outB = await runOnceWithRoiSet(canvas, ROI_SET_B);
@@ -308,29 +352,38 @@
         }else{
           alert('OCR中にエラー: '+(err&&err.message?err.message:err));
         }
-      }
+      } finally { setBusy(false); }
     }
 
     // -------------------- UIイベント --------------------
-    $("pick").addEventListener('click',()=> $("file").click());
+    $("pick").addEventListener('click',(e)=>{ e.stopPropagation(); $("file").click(); });
     $("demo").addEventListener('click',loadDemo);
     $("file").addEventListener('change', async (e)=>{ const f=e.target.files && e.target.files[0]; if(!f) return; await safeLoadImage(f); });
-    const drop=$("drop"); drop.addEventListener('click',()=> $("file").click()); drop.addEventListener('dragover',(e)=>{ e.preventDefault(); drop.classList.add('drag'); }); drop.addEventListener('dragleave',()=> drop.classList.remove('drag')); drop.addEventListener('drop', async (e)=>{ e.preventDefault(); drop.classList.remove('drag'); const f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if(!f) return; await safeLoadImage(f); });
-    $("auto").addEventListener('click',autoAnalyze); $("reset").addEventListener('click',()=>{ location.reload(); });
+    const drop=$("drop");
+    drop.addEventListener('click',(e)=>{ if(e.target.closest('button') || e.target.closest('input')) return; $("file").click(); });
+    drop.addEventListener('dragover',(e)=>{ e.preventDefault(); drop.classList.add('drag'); });
+    drop.addEventListener('dragleave',()=> drop.classList.remove('drag'));
+    drop.addEventListener('drop', async (e)=>{ e.preventDefault(); drop.classList.remove('drag'); const f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if(!f) return; await safeLoadImage(f); });
+    $("auto").addEventListener('click',autoAnalyze);
+    $("reset").addEventListener('click',()=>{ location.reload(); });
     $("copyCsv").addEventListener('click',async ()=>{ const row=fmtRow(values()); try{ await navigator.clipboard.writeText(row); alert('CSV 1行をコピーしました。'); }catch(err){ const ok = confirm('クリップボードに書き込めませんでした。代わりにCSVをダウンロードしますか？'); if(ok){ download('spla_row.csv', row + String.fromCharCode(10)); } } });
     $("append").addEventListener('click',()=>{ const v=values(); state.rows.push(v); saveRows(); renderTable(); });
     $("exportCsv").addEventListener('click',()=>{ const NL=String.fromCharCode(10); const header=['日時','勝敗','ルール','ステージ','ブキ','K','D','A','SP','塗り','備考'].join(',')+NL; const body=state.rows.map(fmtRow).join(NL); download('splatoon3_records.csv', header + body + (body? NL:'')); });
     $("clearAll").addEventListener('click',()=>{ if(!confirm('ローカルの記録を全消去します。よろしいですか？')) return; state.rows=[]; saveRows(); renderTable(); });
 
-    // -------------------- 簡易セルフテスト（テストケース追加） --------------------
+    // -------------------- セルフテスト --------------------
     (function selfTest(){
       const tests = [];
       function assert(name, cond){ tests.push({name, pass: !!cond}); }
-      assert('keepDigits 123', (function(){ const s='a1b2c3'; return s.replace(/[^0-9]/g,'')==='123'; })());
+      // basic utils
       assert('extractNumbersInOrder', JSON.stringify(extractNumbersInOrder('10K 5D 3A'))===JSON.stringify([10,5,3]));
       assert('jaNormalize', jaNormalize('  ﾏﾃｶﾞｲ 放水路  ')==='マテガイ 放水路');
       assert('bestMatch stage', bestMatch('ﾏﾃｶﾞｲ放水路', STAGES).label==='マテガイ放水路');
-      assert('CSP eval blocked detection', isUnsafeEvalBlocked()===true || isUnsafeEvalBlocked()===false); // 実行可能性チェック
+      // postCorrect
+      assert('postCorrect WIN', (function(){ const v=postCorrect({result:'VICTORY', kd:'10 5 2', paint:'530p', mode:'Xマッチ', stage:'ﾏﾃｶﾞｲ放水路', weapon:'ﾊｲﾄﾞﾗﾝﾄ'}); return v.result==='WIN' && v.kills==='10' && v.deaths==='5' && v.assists==='2' && v.paint==='530' && v.stage==='マテガイ放水路' && v.weapon==='ハイドラント'; })());
+      assert('postCorrect keeps zero', (function(){ const v=postCorrect({result:'LOSE', kd:'0 3 5', paint:'120p', mode:'レギュラーマッチ', stage:'マテガイ放水路', weapon:'わかばシューター'}); return String(v.kills)==='0'; })());
+      assert('csvEscape quotes', csvEscape('a,"b",c')==='"a,""b"",c"');
+      assert('isHeic true', (function(){ const f={name:'photo.HEIC', type:'image/heic'}; return isHeic(f)===true; })());
       console.log('[SelfTest]', tests);
       const failed = tests.filter(t=>!t.pass);
       if(failed.length){ console.warn('SelfTest failed:', failed); }
