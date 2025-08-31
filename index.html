@@ -194,7 +194,7 @@
 
     function drawPreview(){ const c=$("preview"), x=c.getContext("2d"); x.clearRect(0,0,c.width,c.height); if(!state.imageBitmap) return; c.width=state.width; c.height=state.height; x.drawImage(state.imageBitmap,0,0,state.width,state.height); }
     function setImgMeta(){ const t = state.image? (state.image.name+"  /  "+state.width+"×"+state.height) : "画像未読込"; $("imgMeta").textContent=t; }
-    function enableImageActions(b){ $("auto").disabled=!b; $("reset").disabled=!b; $("copyCsv").disabled=false; $("append").disabled=false; }
+    function enableImageActions(b){ $("auto").disabled=!b; $("reset").disabled=!b; $("copyCsv").disabled=!b; $("append").disabled=!b; }
     function setBusy(b){ const autoBtn=$("auto"); if(!autoBtn) return; autoBtn.disabled = b; autoBtn.dataset.label = autoBtn.dataset.label || autoBtn.textContent; autoBtn.textContent = b ? '解析中…' : autoBtn.dataset.label; }
     function values(){ const v={}; for(const k of FIELDS){ v[k]=($(k).value||"").toString().trim(); } return v; }
     function setValues(v){ for(const k of FIELDS){ if(k in v) $(k).value = v[k]!==undefined && v[k]!==null ? v[k] : ""; } }
@@ -205,15 +205,26 @@
     function download(name,text){ const blob=new Blob([text],{type:'text/csv;charset=utf-8;'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download=name; a.click(); URL.revokeObjectURL(url); }
 
     // HEICライブラリ遅延ロード（必要時のみ読み込み）
-    /* HEICライブラリはCSPの影響を受けるため使用しない（PNG/JPGのみ対応） */);
-    }
+    /* HEICライブラリはCSPの影響を受けるため使用しない（PNG/JPGのみ対応） */
 
     // 画像ロード（HEIC/縦→横 回転対応）
     function isHeic(file){ const name=(file.name||''); return /\.heic$|\.heif$/i.test(name) || (file.type && /(heic|heif)/i.test(file.type)); }
     async function heicToJpegFile(file){
       throw new Error('HEICは未対応です。PNG/JPGに変換してから読み込んでください。');
     }
-    async function ensureLandscape(bmp){ if(bmp.width >= bmp.height) return bmp; const can = document.createElement('canvas'); can.width = bmp.height; can.height = bmp.width; const ctx = can.getContext('2d'); ctx.save(); ctx.translate(can.width/2, can.height/2); ctx.rotate(Math.PI/2); ctx.drawImage(bmp, -bmp.width/2, -bmp.height/2); ctx.restore(); return await createImageBitmap(can); }(bmp){ if(bmp.width >= bmp.height) return bmp; const can = document.createElement('canvas'); can.width = bmp.height; can.height = bmp.width; const ctx = can.getContext('2d'); ctx.save(); ctx.translate(can.width/2, can.height/2); ctx.rotate(Math.PI/2); ctx.drawImage(bmp, -bmp.width/2, -bmp.height/2); ctx.restore(); return await createImageBitmap(can); }
+    async function ensureLandscape(bmp){
+      if (bmp.width >= bmp.height) return bmp;
+      const can = document.createElement('canvas');
+      can.width = bmp.height;
+      can.height = bmp.width;
+      const ctx = can.getContext('2d');
+      ctx.save();
+      ctx.translate(can.width/2, can.height/2);
+      ctx.rotate(Math.PI/2);
+      ctx.drawImage(bmp, -bmp.width/2, -bmp.height/2);
+      ctx.restore();
+      return await createImageBitmap(can);
+    }
     async function fileToBitmap(file){ try{ return await createImageBitmap(file); }catch(e){ const dataUrl=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(file); }); return await new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>res(createImageBitmap(img)); img.onerror=()=>rej(new Error('画像の読み込みに失敗しました')); img.src=dataUrl; }); } }
     async function safeLoadImage(file){
       try{
@@ -256,9 +267,17 @@
       fd.append('language', lang==='jpn'?'jpn':'eng');
       fd.append('scale','true');
       fd.append('OCREngine','2');
-      const res = await fetch('https://api.ocr.space/parse/image', { method:'POST', body: fd });
-      const j = await res.json();
-      if(!res.ok || j.IsErroredOnProcessing){ throw new Error('OCR API error: '+(j.ErrorMessage||res.status)); }
+      let res, j;
+      try {
+        res = await fetch('https://api.ocr.space/parse/image', { method:'POST', body: fd });
+        j = await res.json();
+      } catch (netErr) {
+        throw new Error('OCR API network error: '+ netErr.message);
+      }
+      if(!res.ok || j.IsErroredOnProcessing){
+        const msg = Array.isArray(j.ErrorMessage) ? j.ErrorMessage.join(',') : (j.ErrorMessage||'');
+        throw new Error('OCR API error: '+ (msg || res.status + ' ' + res.statusText));
+      }
       const text = (j.ParsedResults && j.ParsedResults[0] && j.ParsedResults[0].ParsedText) || '';
       return text.replace(/\t/g,' ').replace(/\n/g,' ').trim();
     }
