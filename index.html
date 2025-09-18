@@ -34,7 +34,7 @@
     .pill { font-size:12px; padding:4px 8px; border-radius:999px; background:#0f172a; border:1px solid #27324f; }
     .hint { font-size:12px; color:#a7f3d0; background:#052e16; border:1px solid #14532d; padding:6px 8px; border-radius:8px; }
   </style>
-  <!-- CSP回避のため tesseract.js は読み込まない。HEICは必要時に遅延ロード（CSPで失敗する場合あり） -->
+  <!-- 内蔵Tesseract.jsでオフラインOCR。HEICは必要時に遅延ロード（CSPで失敗する場合あり） -->
 </head>
 <body>
   <header>
@@ -82,7 +82,7 @@
         </div>
         <div style="height:12px"></div>
         <div class="row" style="align-items:center; gap:12px; margin-bottom:8px">
-          <label class="hint">この環境では <code>unsafe-eval</code> が禁止のため Tesseract.js は使用しません。<br>Windows 10 + Chrome は <code>TextDetector</code> 非対応のため、必要なら「オンラインOCR」をONにしてください（外部送信）。</label>
+          <label class="hint">ローカルOCRは Tesseract.js で動作します。初回解析時はモデル読み込みに数秒かかる場合があります。<br>オンラインOCR（外部送信）は補助用なので、精度不足時のみ有効化してください。</label>
         </div>
         <div class="grid" style="margin-bottom:8px">
           <div>
@@ -181,6 +181,7 @@
     </section>
   </main>
 
+  <script src="vendor/tesseract/tesseract.min.js"></script>
   <script>
     // -------------------- ユーティリティ --------------------
     const $ = (id) => document.getElementById(id);
@@ -237,12 +238,6 @@
         bmp = await ensureLandscape(bmp);
         state.image=file; state.imageBitmap=bmp; state.width=bmp.width; state.height=bmp.height; state.scaleX=state.width/1920; state.scaleY=state.height/1080;
         drawPreview(); setImgMeta(); enableImageActions(true);
-        // TextDetector 非対応かつオンラインOCR未許可なら案内
-        const needOnline = !('TextDetector' in window);
-        if(needOnline && !$("useOnlineOcr").checked){
-          const ok = confirm('このブラウザではローカルOCRが使えません。オンラインOCR（外部送信）を有効にしますか？');
-          if(ok) $("useOnlineOcr").checked = true;
-        }
       }catch(err){
         console.error(err);
         alert('画像の読み込みに失敗しました。\n詳細: '+(err&&err.message?err.message:err));
@@ -257,7 +252,86 @@
     function upscaleCanvas(src, scale=2){ const out=document.createElement('canvas'); out.width = Math.max(1, Math.round(src.width*scale)); out.height = Math.max(1, Math.round(src.height*scale)); const ctx=out.getContext('2d'); ctx.imageSmoothingEnabled=false; ctx.drawImage(src,0,0,out.width,out.height); return out; }
     function binarizeCanvas(src, threshold=150){ const c=document.createElement('canvas'); c.width=src.width; c.height=src.height; const ctx=c.getContext('2d'); ctx.drawImage(src,0,0); const img=ctx.getImageData(0,0,c.width,c.height); const d=img.data; for(let i=0;i<d.length;i+=4){ const r=d[i],g=d[i+1],b=d[i+2]; const v=(r*299+g*587+b*114)/1000|0; const t=v>threshold?255:0; d[i]=t; d[i+1]=t; d[i+2]=t; d[i+3]=255; } ctx.putImageData(img,0,0); return c; }
 
-    // ----------- OCR 実装（CSPセーフ） -----------
+    // ----------- OCR 実装（ローカル優先） -----------
+    const ocrEngine = {
+      worker: null,
+      currentLang: null,
+      loadedLangs: new Set(),
+      initPromise: null
+    };
+
+    async function createTesseractWorker(coreFile){
+      const worker = await Tesseract.createWorker({
+        workerPath: 'vendor/tesseract/worker.min.js',
+        corePath: `vendor/tesseract/${coreFile}`,
+        langPath: 'vendor/tesseract/lang-data',
+        cachePath: 'vendor/tesseract/lang-data'
+      });
+      await worker.load();
+      return worker;
+    }
+
+    async function ensureTesseractWorker(lang){
+      if(!window.Tesseract || typeof Tesseract.createWorker !== 'function'){
+        throw new Error('TESSERACT_NOT_AVAILABLE');
+      }
+      if(!ocrEngine.worker){
+        if(!ocrEngine.initPromise){
+          ocrEngine.initPromise = (async () => {
+            const candidates = ['tesseract-core-simd.wasm.js', 'tesseract-core.wasm.js'];
+            let lastErr = null;
+            for(const core of candidates){
+              try{
+                const worker = await createTesseractWorker(core);
+                return worker;
+              }catch(err){
+                lastErr = err;
+                console.warn('[OCR] failed to initialise', core, err);
+              }
+            }
+            throw lastErr || new Error('Tesseract worker initialisation failed');
+          })();
+        }
+        ocrEngine.worker = await ocrEngine.initPromise;
+      }
+      const parts = lang.split('+');
+      const missing = parts.filter(code => !ocrEngine.loadedLangs.has(code));
+      if(missing.length){
+        await ocrEngine.worker.loadLanguage(missing.join('+'));
+        missing.forEach(code => ocrEngine.loadedLangs.add(code));
+      }
+      if(ocrEngine.currentLang !== lang){
+        await ocrEngine.worker.initialize(lang);
+        ocrEngine.currentLang = lang;
+      }
+      return ocrEngine.worker;
+    }
+
+    async function recognizeLocally(canvas, lang, kind){
+      try{
+        const worker = await ensureTesseractWorker(lang);
+        const params = {
+          tessedit_char_whitelist: '',
+          classify_bln_numeric_mode: '0'
+        };
+        if(kind === 'num'){
+          params.tessedit_char_whitelist = '0123456789';
+          params.classify_bln_numeric_mode = '1';
+        }else if(kind === 'word' && lang === 'eng'){
+          params.tessedit_char_whitelist = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        }
+        await worker.setParameters(params);
+        const { data } = await worker.recognize(canvas);
+        return (data && data.text ? data.text : '').replace(/\s+/g,' ').trim();
+      }catch(err){
+        if(err && err.message === 'TESSERACT_NOT_AVAILABLE'){
+          throw err;
+        }
+        console.warn('[OCR] Local recognition failed', err);
+        return '';
+      }
+    }
+
     async function ocrSpace(canvas, lang){
       const apiKey = ($("ocrApiKey").value||'').trim() || 'helloworld'; // demo key
       const dataUrl = canvas.toDataURL('image/png');
@@ -283,7 +357,6 @@
     }
 
     async function detectAndOcr(binCanvas, lang, kind){
-      // 1) TextDetector が使えればそれを利用（CSP影響なし）
       if('TextDetector' in window){
         try{
           const detector = new window.TextDetector();
@@ -292,16 +365,28 @@
           if(Array.isArray(boxes) && boxes.length){
             return boxes.map(b=>b.rawValue||'').join(' ').trim();
           }
-        }catch(_){/* fallback */}
+        }catch(_){/* ignore and fall back */}
       }
-      // 2) オンラインOCRが有効なら使う
+      try{
+        const localText = await recognizeLocally(binCanvas, lang, kind);
+        if(localText){
+          return localText;
+        }
+      }catch(err){
+        if(err && err.message === 'TESSERACT_NOT_AVAILABLE'){
+          console.warn('[OCR] Tesseract unavailable', err);
+        }else{
+          console.warn('[OCR] Local engine error', err);
+        }
+      }
       if($("useOnlineOcr").checked){
         return await ocrSpace(binCanvas, lang);
       }
-      // 3) 無効なら明示的にエラー
-      throw new Error('OCR_UNAVAILABLE_CSP');
+      if(!window.Tesseract){
+        throw new Error('OCR_UNAVAILABLE_LOCAL');
+      }
+      return '';
     }
-
     // 正規化・辞書・数値抽出
     function hiraganaToKatakana(s){return (s||'').replace(/[\u3041-\u3096]/g, ch => String.fromCharCode(ch.charCodeAt(0)+0x60));}
     function zenkakuToHankaku(s){return (s||'').replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0)-0xFEE0)).replace(/　/g,' ');}    
@@ -351,11 +436,6 @@
     async function autoAnalyze(){
       const canvas=$("preview"); if(!state.imageBitmap) return;
       // ガード: TextDetectorなし & オンラインOCR未許可なら促す
-      if(!('TextDetector' in window) && !$("useOnlineOcr").checked){
-        const ok = confirm('このブラウザではローカルOCRが使えません。オンラインOCR（外部送信）を有効にしますか？');
-        if(ok) { $("useOnlineOcr").checked = true; }
-        else { alert('オンラインOCRを有効にするか、手入力で補完してください。'); return; }
-      }
       setBusy(true);
       try{
         const outA = await runOnceWithRoiSet(canvas, ROI_SET_A);
@@ -366,7 +446,7 @@
         const v = scoreB>scoreA ? vB : vA; setValues(v);
         alert('自動解析が完了しました。誤認識は手で直してください。');
       }catch(err){
-        if(String(err).includes('OCR_UNAVAILABLE_CSP')){
+        if(String(err).includes('OCR_UNAVAILABLE_LOCAL')){
           alert('この環境ではローカルOCRが無効です。オンラインOCRにチェックを入れるか、手入力で補完してください。');
         }else{
           alert('OCR中にエラー: '+(err&&err.message?err.message:err));
