@@ -61,6 +61,8 @@
             <span class="pill" id="imgMeta">画像未読込</span>
           </div>
           <div class="row">
+            <button id="rotateLeft" class="btn" disabled>↺ 90°</button>
+            <button id="rotateRight" class="btn" disabled>↻ 90°</button>
             <button id="auto" class="btn accent" disabled>自動解析</button>
             <button id="reset" class="btn warn" disabled>リセット</button>
           </div>
@@ -186,16 +188,24 @@
     // -------------------- ユーティリティ --------------------
     const $ = (id) => document.getElementById(id);
     const FIELDS = ["matchAt","result","mode","stage","weapon","kills","deaths","assists","specials","paint","note"];
-    const state = { image:null, imageBitmap:null, width:0, height:0, scaleX:1, scaleY:1, rows: JSON.parse(localStorage.getItem("spla-rows")||"[]") };
+    const state = { image:null, originalBitmap:null, imageCanvas:null, width:0, height:0, scaleX:1, scaleY:1, rotation:0, orientationCache:new Map(), rows: JSON.parse(localStorage.getItem("spla-rows")||"[]") };
 
     // 既知辞書（必要に応じて追加可能）
     const MODES = ['レギュラーマッチ','バンカラマッチ','バンカラマッチ（オープン）','バンカラマッチ（チャレンジ）','Xマッチ','フェス（オープン）','フェス（チャレンジ）','プライベートマッチ','サーモンラン'];
     const STAGES = ['マテガイ放水路','ナメロウ金属','ユノハナ大渓谷','ゴンズイ地区','チョウザメ造船','キンメダイ美術館','マヒマヒリゾート＆スパ','ザトウマーケット','スメーシーワールド','マサバ海峡大橋','マンタマリア号','タラポートショッピングパーク','海女美術大学','ショッツル鉱山','アロワナモール','ネギトロ炭鉱'];
     const WEAPONS = ['わかばシューター','もみじシューター','スプラシューター','プロモデラーMG','N-ZAP85','.52ガロン','.96ガロン','ジェットスイーパー','プライムシューター','シャープマーカー','ボールドマーカー','スプラローラー','ダイナモローラー','カーボンローラー','スプラマニューバー','デュアルスイーパー','スパッタリー','クアッドホッパーブラック','パラシェルター','ノヴァブラスター','ラピッドブラスター','ロングブラスター','クラッシュブラスター','リッター4K','スプラチャージャー','スクイックリンα','スプラスピナー','バレルスピナー','ハイドラント'];
 
-    function drawPreview(){ const c=$("preview"), x=c.getContext("2d"); x.clearRect(0,0,c.width,c.height); if(!state.imageBitmap) return; c.width=state.width; c.height=state.height; x.drawImage(state.imageBitmap,0,0,state.width,state.height); }
-    function setImgMeta(){ const t = state.image? (state.image.name+"  /  "+state.width+"×"+state.height) : "画像未読込"; $("imgMeta").textContent=t; }
-    function enableImageActions(b){ $("auto").disabled=!b; $("reset").disabled=!b; $("copyCsv").disabled=!b; $("append").disabled=!b; }
+    function drawPreview(){
+      const canvas=$("preview");
+      if(!canvas) return;
+      if(!state.imageCanvas){ const ctx=canvas.getContext("2d"); ctx.clearRect(0,0,canvas.width,canvas.height); return; }
+      canvas.width=state.imageCanvas.width;
+      canvas.height=state.imageCanvas.height;
+      const ctx=canvas.getContext("2d");
+      ctx.drawImage(state.imageCanvas,0,0);
+    }
+    function setImgMeta(){ const meta = state.image? `${state.image.name}  /  ${state.width}×${state.height}  /  回転 ${state.rotation}°` : "画像未読込"; $("imgMeta").textContent=meta; }
+    function enableImageActions(b){ const targets=['auto','reset','copyCsv','append','rotateLeft','rotateRight']; for(const id of targets){ const btn=$(id); if(btn) btn.disabled=!b; } }
     function setBusy(b){ const autoBtn=$("auto"); if(!autoBtn) return; autoBtn.disabled = b; autoBtn.dataset.label = autoBtn.dataset.label || autoBtn.textContent; autoBtn.textContent = b ? '解析中…' : autoBtn.dataset.label; }
     function values(){ const v={}; for(const k of FIELDS){ v[k]=($(k).value||"").toString().trim(); } return v; }
     function setValues(v){ for(const k of FIELDS){ if(k in v) $(k).value = v[k]!==undefined && v[k]!==null ? v[k] : ""; } }
@@ -213,19 +223,10 @@
     async function heicToJpegFile(file){
       throw new Error('HEICは未対応です。PNG/JPGに変換してから読み込んでください。');
     }
-    async function ensureLandscape(bmp){
-      if (bmp.width >= bmp.height) return bmp;
-      const can = document.createElement('canvas');
-      can.width = bmp.height;
-      can.height = bmp.width;
-      const ctx = can.getContext('2d');
-      ctx.save();
-      ctx.translate(can.width/2, can.height/2);
-      ctx.rotate(Math.PI/2);
-      ctx.drawImage(bmp, -bmp.width/2, -bmp.height/2);
-      ctx.restore();
-      return await createImageBitmap(can);
-    }
+    function normalizeRotation(rot){ const r=((rot%360)+360)%360; return r===0?0:r===90?90:r===180?180:r===270?270:((Math.round(r/90)%4+4)%4)*90; }
+    function createCanvasFromBitmap(bitmap, rotation){ const rot=normalizeRotation(rotation); const swap=rot===90||rot===270; const canvas=document.createElement('canvas'); canvas.width=swap?bitmap.height:bitmap.width; canvas.height=swap?bitmap.width:bitmap.height; const ctx=canvas.getContext('2d'); ctx.save(); ctx.translate(canvas.width/2, canvas.height/2); ctx.rotate((rot*Math.PI)/180); ctx.drawImage(bitmap, -bitmap.width/2, -bitmap.height/2); ctx.restore(); return canvas; }
+    function getCanvasForRotation(rotation){ if(!state.originalBitmap) return null; const rot=normalizeRotation(rotation); if(!state.orientationCache.has(rot)){ const canvas=createCanvasFromBitmap(state.originalBitmap, rot); state.orientationCache.set(rot, canvas); } return state.orientationCache.get(rot); }
+    function setRotation(rotation){ if(!state.originalBitmap) return; const rot=normalizeRotation(rotation); state.rotation=rot; state.imageCanvas=getCanvasForRotation(rot); if(state.imageCanvas){ state.width=state.imageCanvas.width; state.height=state.imageCanvas.height; state.scaleX=state.width/1920; state.scaleY=state.height/1080; } drawPreview(); setImgMeta(); }
     async function fileToBitmap(file){ try{ return await createImageBitmap(file); }catch(e){ const dataUrl=await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=()=>rej(fr.error); fr.readAsDataURL(file); }); return await new Promise((res,rej)=>{ const img=new Image(); img.onload=()=>res(createImageBitmap(img)); img.onerror=()=>rej(new Error('画像の読み込みに失敗しました')); img.src=dataUrl; }); } }
     async function safeLoadImage(file){
       try{
@@ -234,10 +235,11 @@
           throw new Error('HEICは未対応です。PNG/JPGに変換してから再試行してください。');
         }
         if(!file.type || !file.type.startsWith('image/')) throw new Error('画像ファイルではありません');
-        let bmp = await fileToBitmap(file);
-        bmp = await ensureLandscape(bmp);
-        state.image=file; state.imageBitmap=bmp; state.width=bmp.width; state.height=bmp.height; state.scaleX=state.width/1920; state.scaleY=state.height/1080;
-        drawPreview(); setImgMeta(); enableImageActions(true);
+        const bmp = await fileToBitmap(file);
+        state.image=file; state.originalBitmap=bmp; state.orientationCache=new Map();
+        state.orientationCache.set(0, createCanvasFromBitmap(bmp,0));
+        setRotation(0);
+        enableImageActions(true);
       }catch(err){
         console.error(err);
         alert('画像の読み込みに失敗しました。\n詳細: '+(err&&err.message?err.message:err));
@@ -312,7 +314,10 @@
         const worker = await ensureTesseractWorker(lang);
         const params = {
           tessedit_char_whitelist: '',
-          classify_bln_numeric_mode: '0'
+          classify_bln_numeric_mode: '0',
+          tessedit_pageseg_mode: '7',
+          preserve_interword_spaces: '1',
+          user_defined_dpi: '150'
         };
         if(kind === 'num'){
           params.tessedit_char_whitelist = '0123456789';
@@ -367,8 +372,9 @@
           }
         }catch(_){/* ignore and fall back */}
       }
+      const localLang = lang==='jpn' ? 'jpn+eng' : 'eng';
       try{
-        const localText = await recognizeLocally(binCanvas, lang, kind);
+        const localText = await recognizeLocally(binCanvas, localLang, kind);
         if(localText){
           return localText;
         }
@@ -413,6 +419,17 @@
       return out;
     }
 
+    function recognitionScore(out){ return (bestMatch(out.mode||'', MODES).score + bestMatch(out.stage||'', STAGES).score + bestMatch(out.weapon||'', WEAPONS).score); }
+
+    async function analyzeWithRoiSets(canvas){
+      const outA = await runOnceWithRoiSet(canvas, ROI_SET_A);
+      const outB = await runOnceWithRoiSet(canvas, ROI_SET_B);
+      const scoreA = recognitionScore(outA);
+      const scoreB = recognitionScore(outB);
+      return scoreB>scoreA ? {score:scoreB, raw:outB} : {score:scoreA, raw:outA};
+    }
+
+
     function postCorrect(out){
       let result='';
       const r=(out.result||'').toUpperCase();
@@ -434,20 +451,30 @@
     }
 
     async function autoAnalyze(){
-      const canvas=$("preview"); if(!state.imageBitmap) return;
-      // ガード: TextDetectorなし & オンラインOCR未許可なら促す
+      if(!state.originalBitmap) return;
       setBusy(true);
       try{
-        const outA = await runOnceWithRoiSet(canvas, ROI_SET_A);
-        const outB = await runOnceWithRoiSet(canvas, ROI_SET_B);
-        const vA = postCorrect(outA), vB = postCorrect(outB);
-        const scoreA = (bestMatch(outA.mode||'', MODES).score + bestMatch(outA.stage||'', STAGES).score + bestMatch(outA.weapon||'', WEAPONS).score);
-        const scoreB = (bestMatch(outB.mode||'', MODES).score + bestMatch(outB.stage||'', STAGES).score + bestMatch(outB.weapon||'', WEAPONS).score);
-        const v = scoreB>scoreA ? vB : vA; setValues(v);
+        const rotations = Array.from(new Set([state.rotation,0,90,180,270].map(normalizeRotation)));
+        let best = null;
+        for(const rot of rotations){
+          const canvas = getCanvasForRotation(rot);
+          if(!canvas) continue;
+          const analysis = await analyzeWithRoiSets(canvas);
+          if(!best || analysis.score > best.score){
+            best = { ...analysis, rotation: rot };
+          }
+        }
+        if(!best){ throw new Error('OCR_NO_RESULT'); }
+        setRotation(best.rotation);
+        const values = postCorrect(best.raw);
+        setValues(values);
         alert('自動解析が完了しました。誤認識は手で直してください。');
       }catch(err){
-        if(String(err).includes('OCR_UNAVAILABLE_LOCAL')){
+        const msg = String(err);
+        if(msg.includes('OCR_UNAVAILABLE_LOCAL')){
           alert('この環境ではローカルOCRが無効です。オンラインOCRにチェックを入れるか、手入力で補完してください。');
+        }else if(msg.includes('OCR_NO_RESULT')){
+          alert('自動解析に失敗しました。画像の向きや明るさを調整して再試行してください。');
         }else{
           alert('OCR中にエラー: '+(err&&err.message?err.message:err));
         }
@@ -465,6 +492,8 @@
     drop.addEventListener('drop', async (e)=>{ e.preventDefault(); drop.classList.remove('drag'); const f=e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if(!f) return; await safeLoadImage(f); });
     $("auto").addEventListener('click',autoAnalyze);
     $("reset").addEventListener('click',()=>{ location.reload(); });
+    $("rotateLeft").addEventListener('click',()=>{ if(!state.originalBitmap) return; setRotation(state.rotation - 90); });
+    $("rotateRight").addEventListener('click',()=>{ if(!state.originalBitmap) return; setRotation(state.rotation + 90); });
     $("copyCsv").addEventListener('click',async ()=>{ const row=fmtRow(values()); try{ await navigator.clipboard.writeText(row); alert('CSV 1行をコピーしました。'); }catch(err){ const ok = confirm('クリップボードに書き込めませんでした。代わりにCSVをダウンロードしますか？'); if(ok){ download('spla_row.csv', row + String.fromCharCode(10)); } } });
     $("append").addEventListener('click',()=>{ const v=values(); state.rows.push(v); saveRows(); renderTable(); });
     $("exportCsv").addEventListener('click',()=>{ const NL=String.fromCharCode(10); const header=['日時','勝敗','ルール','ステージ','ブキ','K','D','A','SP','塗り','備考'].join(',')+NL; const body=state.rows.map(fmtRow).join(NL); download('splatoon3_records.csv', header + body + (body? NL:'')); });
