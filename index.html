@@ -646,8 +646,43 @@ function getPortraitRoiSets(canvas) {
   ];
 }
 
+// SplatNet3 iPhoneスクショ（縦画面: 幅 < 高さ）専用ROI
+// レイアウト: 上部にステージ名・ルール → 中段にWIN/LOSEバナー → 下部にプレイヤー行
+function getSplatNetPortraitRoiSets(canvas) {
+  const detected = detectArrowRow(canvas);
+  // 矢印行が見つかれば利用、なければ典型的な位置（LOSE側プレイヤーは約65%付近）
+  const arrowY = clamp(detected ?? 0.65, 0.30, 0.85);
+  const rh = 0.035;
+  const playerTop = clamp(arrowY - rh, 0.28, 0.82);
+  const playerBot = clamp(arrowY + rh, playerTop + 0.03, 0.90);
+  const rowH = playerBot - playerTop;
+
+  // resultは WIN!/LOSE... バナーが縦に並ぶ領域を広めに取る（どちらかが読める）
+  // 勝者チームバナー(~37-41%)・敗者チームバナー(~56-61%)を両方カバー
+  const base = {
+    mode:   { x:0.05, y:0.09, w:0.65, h:0.10 },
+    stage:  { x:0.20, y:0.03, w:0.75, h:0.09 },
+    result: { x:0.05, y:0.34, w:0.65, h:0.30 },  // WIN/LOSE両バナーカバー
+    weapon: { x:0.05, y:playerTop, w:0.50, h:rowH },
+    kd:     { x:0.54, y:clamp(playerTop-0.01,0,1), w:0.28, h:Math.min(rowH+0.02,0.12) },
+    paint:  { x:0.75, y:playerTop, w:0.20, h:rowH },
+  };
+  const alt = {
+    mode:   { x:0.03, y:0.07, w:0.75, h:0.12 },
+    stage:  { x:0.10, y:0.02, w:0.88, h:0.10 },
+    result: { x:0.03, y:0.32, w:0.70, h:0.33 },
+    weapon: { x:0.03, y:clamp(playerTop-0.02,0,1), w:0.55, h:Math.min(rowH+0.04,0.12) },
+    kd:     { x:0.50, y:clamp(playerTop-0.02,0,1), w:0.32, h:Math.min(rowH+0.04,0.12) },
+    paint:  { x:0.73, y:clamp(playerTop-0.01,0,1), w:0.23, h:Math.min(rowH+0.02,0.12) },
+  };
+  return [base, alt];
+}
+
 function roiCandidates(canvas) {
-  return canvas.width / canvas.height > 1.95 ? getPortraitRoiSets(canvas) : [ROI_SET_A, ROI_SET_B];
+  const aspect = canvas.width / canvas.height;
+  if (aspect < 0.75) return getSplatNetPortraitRoiSets(canvas); // 縦画面(SplatNet3等)
+  if (aspect > 1.95) return getPortraitRoiSets(canvas);         // 超横長
+  return [ROI_SET_A, ROI_SET_B];                                 // Switch横画面
 }
 
 async function runWithRoiSet(canvas, ROIS) {
@@ -778,12 +813,15 @@ async function autoAnalyze() {
   $('ocrProgress').style.display = 'block';
   setOcrStatus('Tesseractモデルを読み込み中…', 10);
   try {
-    const rotations = [...new Set([state.rotation, 0, 90, 180, 270].map(normalizeRotation))];
+    // 縦画面（SplatNet3スクショ等）は0°/180°のみ試す。横画面は4方向。
+    const isPortrait = state.originalBitmap.height > state.originalBitmap.width;
+    const candidateRots = isPortrait ? [0, 180] : [0, 90, 180, 270];
+    const rotations = [...new Set([state.rotation, ...candidateRots].map(normalizeRotation))];
     let best = null;
     for (const rot of rotations) {
       const canvas = getCanvasForRotation(rot);
       if (!canvas) continue;
-      setOcrStatus(`回転 ${rot}° で解析中…`, 20 + rotations.indexOf(rot) * 15);
+      setOcrStatus(`回転 ${rot}° で解析中…`, 20 + rotations.indexOf(rot) * 20);
       const analysis = await analyzeWithRoiSets(canvas);
       if (!best || analysis.score > best.score) best = { ...analysis, rotation: rot };
     }
